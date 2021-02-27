@@ -15,6 +15,7 @@ lab2 中，我们实现了第一个系统调用 `sys_write`，这使得我们可
 
 ### 实验要求
 
+- 实现分支 ch2。
 - 完成实验指导书中的内容，能运行用户态程序并执行 sys_write 和 sys_exit 系统调用。
 - 增加对 sys_write 的安全检查，通过[C测例](https://github.com/DeathWish5/riscvos-c-tests) 中 chapter2 对应的所有测例，测例详情见对应仓库，系统调用具体要求参考[这里](https://github.com/DeathWish5/riscvos-c-tests/blob/main/guide.md#lab2)。
 
@@ -33,7 +34,14 @@ lab2 中，我们实现了第一个系统调用 `sys_write`，这使得我们可
 
 - 检查
 
-    可以正确 `make run` 执行，可以正确执行目标用户测例，并得到预期输出（详见测例注释）。
+    ```console
+    $ cd os
+    $ git checkout ch2
+    $ make run
+    ```
+    可以正确执行正确执行目标用户测例，并得到预期输出（详见测例注释）。
+
+    注意：如果设置默认 log 等级，从 lab2 开始关闭所有 log 输出。
 
 ## 问答作业
 
