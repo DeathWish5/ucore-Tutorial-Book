@@ -19,6 +19,7 @@ lab2 中，我们实现了第一个系统调用 `sys_write`，这使得我们可
 - 完成实验指导书中的内容，能运行用户态程序并执行 sys_write 和 sys_exit 系统调用。
 - 增加对 sys_write 的安全检查，通过[C测例](https://github.com/DeathWish5/riscvos-c-tests) 中 chapter2 对应的所有测例，测例详情见对应仓库，系统调用具体要求参考[这里](https://github.com/DeathWish5/riscvos-c-tests/blob/main/guide.md#lab2)。
 
+challenge: 实现多核，可以并行执行用户程序。
 
 ### 实验检查
 
@@ -90,4 +91,4 @@ lab2 中，我们实现了第一个系统调用 `sys_write`，这使得我们可
         jr t0
         ```
 
-
+3. 描述程序陷入内核的两大原因是中断和异常，请问 riscv64 支持那些中断／异常？如何判断进入内核是由于中断还是异常？描述陷入内核时的几个重要寄存器及其值。
