@@ -10,12 +10,14 @@ lab2 中，我们实现了第一个系统调用 `sys_write`，这使得我们可
 
 由于还没有实现虚拟内存，我们可以在用户程序中指定一个属于其他程序字符串，并将它输出，这显然是不合理的，因此我们要对 sys_write 做检查：
 
-- sys_write 仅能输出位于程序本身内存空间内的数据，否则报错。
+- 传入的 **fd** 是否合法（目前仅支持 stdout，也就是 0）
+- 传入缓冲区位于用户地址之外（需要检查 .text .data .bss 各段以及用户栈，如果是 bin 格式会简单很多）
 
 ### 实验要求
 
-- 完成实验指导书中的内容，能运行用户态程序并执行 sys_write 系统调用。
-- 通过 `Rust测例 <https://github.com/DeathWish5/rCore_tutorial_tests>`_ 或者 `C测例 <https://github.com/DeathWish5/riscvos-c-tests>`_ 中 chapter2 对应的所有测例，测例详情见对应仓库。
+- 完成实验指导书中的内容，能运行用户态程序并执行 sys_write 和 sys_exit 系统调用。
+- 增加对 sys_write 的安全检查，通过[C测例](https://github.com/DeathWish5/riscvos-c-tests) 中 chapter2 对应的所有测例，测例详情见对应仓库，系统调用具体要求参考[这里](https://github.com/DeathWish5/riscvos-c-tests/blob/main/guide.md#lab2)。
+
 
 ### 实验检查
 
