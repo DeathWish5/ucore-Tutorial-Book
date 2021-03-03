@@ -58,7 +58,10 @@ challenge:实现多核 boot。
 
 ```
    ├── os(内核实现)
-   │   ├── Makefile (要求 make run LOG=xxx 可以正确执行，可以不实现对 LOG 这一属性的支持，设置默认输出等级为 INFO)
+   │   ├── Makefile (要求 make run LOG=xxx 可以正确执行)
+   │   └── ...
+   ├── reports(报告)
+   │   ├── lab1.md/pdf
    │   └── ...
    ├── reports(报告)
    │   ├── lab1.md/pdf

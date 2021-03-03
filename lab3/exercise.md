@@ -75,25 +75,19 @@ challenge: 实现多核，可以并行调度。
 
     - 为什么？尝试简单说明（传达思想即可，不要求严格证明）。
 
-    在已知以上结论的前提下，假设我们通过如下函数寻找 stride 最小的进程：
+    在已知以上结论的前提下，假设我们通过逐个比较得到 Stride 最小的进程，请设计一个合适的比较函数，用来正确比较两个 Stride 的大小：
 
     ```c++
     typedef unsigned long long Stride_t;
-    bool Less(Stride_t, Stride_t);
-    struct proc* find_min_stride() {
-        struct proc* find = NULL;
-        Stride_t min_stride = INFI;
-        for(auto p = pool.first(); p < pool.end(); ++p) {
-            if(p.valid() && Less(p.stride, min_stride))
-                find = p;
-        }
-        return find;
+    const Stride_t BIGSTRIDE = 0xffffffffffffffffULL;
+    bool Less(Stride_t, Stride_t) {
+        // ...
     }
+
     ```
-    - 请设计一个 `Less()` 函数，用来正确比较两个 Stride 的大小。假设 Stride 永远不会相等。
 
 ## 报告要求
 
-* 简单总结本次实验你增加的东西。（控制在5行以内，不要贴代码）
+* 简单总结本次实验与上个实验相比你增加的东西。（控制在5行以内，不要贴代码）
 * 完成问答问题
 * (optional) 你对本次实验设计及难度的看法。
