@@ -49,7 +49,7 @@ fstat:
   * 参数：
     * fd: 文件描述符
     * st: 文件状态结构体
-      ``c
+      ```c
       struct Stat {
       	uint64 dev,		// 文件所在磁盘驱动器号，本不考虑 
       	uint64 ino,		// inode 文件所在 inode 编号
@@ -61,7 +61,7 @@ fstat:
       // 文件类型只需要考虑:
       ＃define DIR 0o040000		// directory
       ＃define FILE 0o100000		// ordinary regular file
-      ``
+      ```
     * 返回值：如果出现了错误则返回 -1，否则返回 0。
     * 可能的错误
       * fd 无效。
