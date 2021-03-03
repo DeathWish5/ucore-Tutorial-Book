@@ -51,11 +51,11 @@ fstat:
     * st: 文件状态结构体
       ```c
       struct Stat {
-      	uint64 dev,		// 文件所在磁盘驱动器号，本不考虑 
-      	uint64 ino,		// inode 文件所在 inode 编号
-      	uint32 mode,	// 文件类型
-      	uint32 nlink,	// 硬链接数量，初始为1
-      	uint64 pad[7],	// 无需考虑，为了兼容性设计
+      	uint64 dev,     // 文件所在磁盘驱动器号
+      	uint64 ino,     // inode 文件所在 inode 编号
+      	uint32 mode,    // 文件类型
+      	uint32 nlink,   // 硬链接数量，初始为1
+      	uint64 pad[7],  // 无需考虑，为了兼容性设计
       }
       
       // 文件类型只需要考虑:
