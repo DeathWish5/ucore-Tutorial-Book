@@ -8,7 +8,7 @@
 
 大家一定好奇过为啥进程创建要用 fork + execve 这么一个奇怪的系统调用，就不能直接搞一个新进程吗？思而不学则殆，我们就来试一试！这章的编程练习请大家实现一个完全 DIY 的系统调用 spawn，用以创建一个新进程。
 
-spawn
+spawn ([标准spawn看这里](https://man7.org/linux/man-pages/man3/posix_spawn.3.html>))
 - syscall ID: 400
 - C 接口：`int spawn(char *filename)`
 - Rust 接口：`fn spawn(file: *const u8) -> isize`
