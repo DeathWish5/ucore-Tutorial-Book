@@ -16,7 +16,7 @@
 
 我们基本上还是使用原有的进程模型，不过由于我们在内核态-用户态切换的时候处理了页表，所以切换时不需要处理 `satp`，但是需要完成寄存器的切换（也就是寄存器的保存和恢复）已经堆栈切换（本质是 `sp` 寄存器的切换）。
 
-要在不同内核线程之间切换首先需要有不同的内核线程。在新增的 `proc.h`、`proc.c` 文件种，可以看到进程的定义和初始化。
+要在不同内核线程之间切换首先需要有不同的内核线程。在新增的 `proc.h`、`proc.c` 文件中，可以看到进程的定义和初始化。
 
 ```c
 // kernel/trap.h
@@ -26,11 +26,11 @@ struct proc {
     uint64 ustack;
     uint64 kstack;
     struct trapframe *trapframe; 
-    struct context context; // 用于保存进程寄存器信息，用于切换
+    struct context context; // 用于保存进程内核态的寄存器信息，进程切换时使用
 };
 ```
 
-其中 `trapframe` 定义不变，其余结构体定义如下：
+`struct proc` 一般称作进程控制块，因为它包含了进程几乎所有的信息（例如保存内核栈上的信息可以通过 `trapframe`访问）。 `trapframe` 定义不变，`context`结构体定义如下：
 
 ```c
 // kernel/trap.h
@@ -60,18 +60,18 @@ enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 ```
 目前我们只使用这些状态中的一小部分。
 
-进程池定义以及初始化如下：
+进程池定义以及进程池初始化如下所示：
 
 ```c
 // kernel/trap.c
 struct proc pool[NPROC];
-struct proc idle;
-struct proc* current_proc;
+struct proc idle;           // boot proc，始终存在
+struct proc* current_proc;  // 指示当前进程
 
 char kstack[NPROC][PAGE_SIZE];
 char ustack[NPROC][PAGE_SIZE];
 char trapframe[NPROC][PAGE_SIZE];
-extern char boot_stack_top[];
+extern char boot_stack_top[];   // bootstack，用作 idle proc kernel stack
 ```
 ```c
 // kernel/trap.c
@@ -89,4 +89,198 @@ procinit(void)
     idle.pid = 0;
 }
 ```
+
+被标记为 `UNUSED` 表明进程池该位置没有被使用。
+
+## 用户进程加载
+
+然后我们来看看用户进程的加载与 lab2 有何异同。加载同样在 `batch.c` 完成。
+
+```c
+// kernel/batch.c
+
+int load_app(int n, uint64* info) {
+    uint64 start = info[n], end = info[n+1], length = end - start;
+    memset((void*)BASE_ADDRESS + n * MAX_APP_SIZE, 0, MAX_APP_SIZE);
+    memmove((void*)BASE_ADDRESS + n * MAX_APP_SIZE, (void*)start, length);
+    return length;
+}
+
+int run_all_app() {
+    for(int i = 0; i < app_num; ++i) {
+        struct proc* p = allocproc();    // 分配一个进程控制块
+        struct trapframe* trapframe = p->trapframe;
+        printf("run app %d\n", i);
+        load_app(i, app_info_ptr);
+        uint64 entry = BASE_ADDRESS + i*MAX_APP_SIZE;
+        trapframe->epc = entry;
+        trapframe->sp = (uint64) p->ustack + PAGE_SIZE;
+        p->state = RUNNABLE;
+    }
+    return 0;
+}
+```
+
+可以看到，进程 load 的逻辑其实没有变化，但是：
+
+* 一次性加载所有进程，而不是运行完一个再加载一个。
+* 每个进程加载的位置不同，而不是加载于同一位置。
+
+这个我们认为设定每个进程所使用的空间是 `[0x80400000 + id*0x20000, 0x80400000 + (id+1)*0x20000)`，每个进程的最大 size 为 0x20000，id 即为进程编号。这个变化是平凡的，因为我们要同时运行多个进程，自然需要所有进程同时存在于内存中。
+
+> 用户态的进程编译也需要按照这个要求编译，也就是第 i 个程序的起始地址必须为 `0x80400000 + i*0x20000`, 示例代码/测例代码用户态都已经实现这一点。
+
+`allocproc()` 函数的作用是从进程池中找到一个 `UNUSED` 的进程控制块，进行基本初始化并返回其指针，具体如下：
+
+```c
+// kernel/proc.c
+struct proc* allocproc(void)
+{
+    struct proc *p;
+    for(p = pool; p < &pool[NPROC]; p++) {
+        if(p->state == UNUSED) {
+            goto found;
+        }
+    }
+    return 0;
+
+    found:
+    p->pid = allocpid();    // 分配一个没有被使用过的 id
+    p->state = USED;        // 标记该控制块被使用
+    memset(&p->context, 0, sizeof(p->context));
+    memset(p->trapframe, 0, PAGE_SIZE);
+    memset((void*)p->kstack, 0, PAGE_SIZE);
+    // 初始化第一次运行的上下文信息
+    p->context.ra = (uint64)usertrapret;    
+    p->context.sp = p->kstack + PAGE_SIZE;
+    return p;
+}
+```
+
+其中，对于 `p->context` 的初始化和 lab2 中我们对于 `trapframe` 的初始化有异曲同工之妙。开始运行一个进程，在这里复用了程序 yield 之后重新开始运行的流程。进程切换的整体流程如下：
+
+```c
+
+1.程序调用 yield 暂停执行 -> 2.进入内核态 -> 3.内核态切换切到其他进程 -> ... 4.其他进程执行 ... -> 5.其他进程通过相同流程切回到该进程 -> 6.返回用户态 -> 7. 用户态继续执行。
+
+```
+
+这其中，`1` `2` `6` `7` 几个步骤都是 lab2 中的标准步骤，进程切换相当于一个特殊的中断处理。而开始运行一个进程从 lab2 中的 `6` `7` 变成了 `5` `6` `7` 。
+
+这一章核心的内容就是 `3` `5` 两个新增步骤了，我们来看看这两个步骤的核心流程。
+
+## 进程切换核心函数
+
+当一个内核线程判断自己要切换出去的时候，它会调用 `sched`函数，并最终通过`swtch` 函数完成切换：
+
+```c
+// kernel/trap.c
+void
+sched(void)
+{
+    struct proc *p = curr_proc();
+    swtch(&p->context, &idle.context);
+}
+```
+
+`swtch` 函数的两个参数就是进程控制块的 `context` 结构体的指针，分别为当前进程的和目标进程的。`swtch` 函数设计编译器不能控制的行为，必须汇编实现，**但是编译器还是帮助我们干了一些事情，如保存调用者保存寄存器，设定 ra**。`swtch` 实现如下：
+
+```c
+# Context switch
+#
+#   void swtch(struct context *old, struct context *new);
+#
+# Save current registers in old. Load from new.
+
+
+.globl swtch
+
+# a0 = &old_context, a1 = &new_context
+
+swtch:
+    sd ra, 0(a0)        # save `ra`
+    sd sp, 8(a0)        # save `sp`
+    sd s0, 16(a0)
+    sd s1, 24(a0)
+    sd s2, 32(a0)
+    sd s3, 40(a0)
+    sd s4, 48(a0)
+    sd s5, 56(a0)
+    sd s6, 64(a0)
+    sd s7, 72(a0)
+    sd s8, 80(a0)
+    sd s9, 88(a0)
+    sd s10, 96(a0)
+    sd s11, 104(a0)
+
+    ld ra, 0(a1)        # restore `ra`
+    ld sp, 8(a1)        # restore `sp`
+    ld s0, 16(a1)
+    ld s1, 24(a1)
+    ld s2, 32(a1)
+    ld s3, 40(a1)
+    ld s4, 48(a1)
+    ld s5, 56(a1)
+    ld s6, 64(a1)
+    ld s7, 72(a1)
+    ld s8, 80(a1)
+    ld s9, 88(a1)
+    ld s10, 96(a1)
+    ld s11, 104(a1)
+
+    ret                 # return to new `ra`
+```
+
+这个函数的汇编实现看似简单，但其实干了一些常规函数绝对不敢干的事情：
+
+* 改变了 `ra`，使得函数 ret 时，不会返回调用它的函数（这里不妨成为父函数），而是另一个地方（储存在 `0(a1)`中）。事实上，返回的地方是其他因为调用 `swtch` 函数而没有继续执行的父函数。
+* 改变了 `sp`，该函数没有任何对堆栈的直接操作，所以直接修改 sp 并没有破坏该函数的执行。
+
+该函数成功的切换了：
+* 执行流：通过切换 `ra`
+* 堆栈：通过切换 `sp`
+* 寄存器：通过保存和恢复被调用者保存寄存器。调用者保存寄存器由编译器生成的代码负责保存和恢复。
+
+接下来，我们来看看进程切换的整体流程。
+
+## 进程切换整体代码框架
+
+你可能已经注意到了，示例代码中，`sched` 函数并没有如我们所设想的进程切换模型：找到下一个执行的进程，然后 `swtch` 过去。而是直接切到了 `idle` 进程。那么 `idle` 进程会从那里继续执行呢？思考这个问题之前，我们需要先搞明白，到底是谁开始执行了第一个进程？没错，就是 `idle` 进程，`idle` 进程是第一个进程(boot进程)，也是唯一一个永远会存在的进程，它还有一个大家更熟悉的面孔，它就是 os 的 `main` 函数。
+
+是时候从头开始梳理从机器 boot 到多个用户进程相互切换到底发生了什么了。
+
+```c
+void main() {
+    clean_bss();    // 清空 bss 段
+    trapinit();     // 开启中断
+    batchinit();    // 初始化 app_info_ptr 指针
+    procinit();     // 初始化线程池
+    // timerinit();    // 开启时钟中断，现在还没有
+    run_all_app();  // 加载所有用户程序
+    scheduler();    // 开始调度
+}
+```
+
+从 main 函数可以看出，`idle` 线程在完成一系列初始化之后，开始运行 `scheduler` 函数，然后就再也没有回来...
+
+```c
+void
+scheduler(void)
+{
+    struct proc *p;
+    for(;;){
+        for(p = pool; p < &pool[NPROC]; p++) {
+            if(p->state == RUNNABLE) {
+                p->state = RUNNING;
+                current_proc = p;
+                swtch(&idle.context, &p->context);
+            }
+        }
+    }
+}
+```
+
+可以看到 `idle` 线程死循环在了一件事情上：寻找一个 `RUNNABLE` 的进程，然后切换到它开始执行。当这个进程调用 `sched` 后，执行流会回到 `idle` 线程，然后继续开始寻找，如此往复。直到所有进程执行完毕，在 sys_exit 系统调用中有统计计数，一旦 exit 的进程达到用户程序数量就关机。
+
+也就是说，所有进程间切换都需要通过 `idle` 中转一下。那么可不可以一步到位呢？
 
