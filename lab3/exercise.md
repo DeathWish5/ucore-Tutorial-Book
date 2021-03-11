@@ -50,7 +50,7 @@ challenge: 实现多核，可以并行调度。
 
 考虑在一个完整的 os 中，随时可能有新进程产生，新进程在调度池中的位置见[chapter5相关代码](https://github.com/DeathWish5/ucore-Tutorial/blob/ch5/kernel/proc.c#L90-L98)。
 
-1. 请简要描述[chapter３示例代码](https://github.com/DeathWish5/ucore-Tutorial/blob/ch3/kernel/proc.c#L60-L74)调度策略，尽可能多的指出该策略存在的缺点。
+1. 请简要描述[chapter3示例代码](https://github.com/DeathWish5/ucore-Tutorial/blob/ch3/kernel/proc.c#L60-L74)调度策略，尽可能多的指出该策略存在的缺点。
 
 2. 该调度策略在公平性上存在比较大的问题，请找到一个进程产生和结束的时间序列，使得在该调度算法下发生：先创建的进程后执行的现象。你需要给出类似下面例子的信息（有更详细的分析描述更好，但尽量精简）。同时指出该序列在你实现的 stride 调度算法下顺序是怎样的？
 
