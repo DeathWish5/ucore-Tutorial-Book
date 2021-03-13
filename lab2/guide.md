@@ -222,25 +222,33 @@ userret:
 
 ```c
 // kernel/batch.c
-__attribute__ ((aligned (16))) char user_stack[4096];       // 预定义的用户 stack
-__attribute__ ((aligned (16))) char trap_page[4096];        // 预定义的中断页，用来存放 trapframe
+__attribute__ ((aligned (4096))) char user_stack[4096];       // 预定义的用户 stack
+__attribute__ ((aligned (4096))) char trap_page[4096];        // 预定义的中断页，用来存放 trapframe
+// run_first_app 也使用这个函数
 int run_next_app() {
     struct trapframe* trapframe = (struct trapframe*)trap_page;
-    app_cur++;          // user-app counter
     app_info_ptr++;     // go to the location of next user-app
-    if(app_cur >= app_num) {
-        return -1;
-    }
-    uint64 length = load_app(app_info_ptr);
+    load_app(app_info_ptr);
     memset(trapframe, 0, 4096);
+    // 设置 trapframe
     trapframe->epc = BASE_ADDRESS;                  // epc 也就是返回地址，设置为用户程序起始地址
-    trapframe->sp = (uint64) user_stack + 4096;     // 设置 user stack
+    trapframe->sp = (uint64) user_stack + 4096;     // 设置为用户栈顶
     usertrapret(trapframe, (uint64)boot_stack);     // 调用 usertrapret 启动用户程序
     return 0;
 }
 ```
 
-当程序退出或者被杀死后，我们就会调用 `run_next_app`,直到全部应用结束。
+通过巧妙的设置 `trapframe`（其实只是设置了 `epc` 和 `sp`，因为程序开始运行时对其他寄存器没有要求），我们复用了用户态中断处理完成后返回的函数，使得使用该 `trapframe` 返回后，用户程序刚好可以开始执行。用户进程中断处理的全流程图示如下：
+
+```c
+
+1.程序进行系统调用或者出现异常 -> 2.进入内核态 ->  ... 3.内核态完成系统调用 ...  ->  4. 返回用户态 -> 5.用户态继续执行
+
+```
+
+而开始运行一个进程就是其中的 `4` `5` 两步骤。
+
+此外当一个应用退出后，也会调用 `run_next_app`开始运行下一个应用，直到全部应用结束。
 
 ## 用户中断处理
 
@@ -250,11 +258,12 @@ int run_next_app() {
 // set up to take exceptions and traps while in the kernel.
 void trapinit(void)
 {
-    w_stvec((uint64)uservec & ~0x3);   // 最后两位表明跳转模式，该实验始终为 0
+    w_stvec((uint64)uservec & ~0x3);   // 写 stvec, 最后两位表明跳转模式，该实验始终为 0
+    intr_on();      // 开启中断使能
 }
 ```
 
-这个函数填写 `stvec` 寄存器，当发生中断异常的时候会跳转到寄存器指定地址。当 U 态发生中断（系统调用）或者异常时，硬件会完成一些中断寄存器的保存，最重要的就是 `sepc` 寄存器，表明了中断发生的地址，它将帮助我们正确的返回。此外还有 sstatus、scause、stval，含义请查阅手册。我们来看看 `stvec` 的值，也就是 `uservec` 函数干了那些事情。
+这个函数填写 `stvec` 寄存器，用于保存中断发生时跳转到的地址，也就是中断处理函数入口地址。当 U 态发生中断（系统调用）或者异常时，硬件会完成一些中断寄存器的保存，最重要的就是 `sepc` 寄存器，表明了中断发生的地址，它将帮助我们正确的返回。此外还有 sstatus、scause、stval，含义请查阅手册。我们来看看 `stvec` 的值，也就是 `uservec` 函数干了那些事情。
 
 ```assembly
 .globl uservec
@@ -328,6 +337,10 @@ void usertrap(struct trapframe *trapframe)
 ```
 
 至此，我们只需要完成系统调用的处理，也就是 `syscall` 函数就完成第二章的基础功能了，这部分逻辑在 `syscall.c` 中，由于十分简单，不做赘述。
+
+## 总体执行流程
+
+
 
 ## 展望
 

@@ -14,6 +14,8 @@ lab1 的工作使得我们从硬件世界跳入了软件世界，当看到自己
 
 如果你明白了我们是如何利用串口实现输出，那么要实现彩色输出就十分容易了，只需要用需要输出的字符串替换上一条命令中的 `hello world`，用期望颜色替换 `31` (代表红色)即可。
 
+> **注意：实现不同等级的输出不是实验要求，如下设定仅为推荐实现！**
+
 我们推荐实现如下几个等级的输出，输出优先级依次降低：
 
 | 名称  |   颜色   |                     用途                     |
@@ -33,9 +35,9 @@ lab1 的工作使得我们从硬件世界跳入了软件世界，当看到自己
 ```rust
     // 这段代码输出了 os 内存空间布局，这到这些信息对于编写 os 十分重要
     　
-    info!(".text [{:#x}, {:#x})", stext as usize, etext as usize);
-    debug!(".rodata [{:#x}, {:#x})", srodata as usize, erodata as usize);
-    error!(".data [{:#x}, {:#x})", sdata as usize, edata as usize);
+    info!(".text [{:#x}, {:#x})", s_text as usize, e_text as usize);
+    debug!(".rodata [{:#x}, {:#x})", s_rodata as usize, e_rodata as usize);
+    error!(".data [{:#x}, {:#x})", s_data as usize, e_data as usize);
 ```
 ``` c
     info("load range : [%d, %d] start = %d\n", s, e, start);
@@ -43,12 +45,12 @@ lab1 的工作使得我们从硬件世界跳入了软件世界，当看到自己
 
 在以后，我们还可以在 log 信息中增加线程、CPU等信息（只是一个推荐，不做要求），这些信息将极大的方便你的代码调试。
 
-
 ### 编程实验要求
 - 实现分支：ch1。
 - 完成实验指导书中的内容，在裸机上实现 `hello world` 输出。
-- 实现彩色输出宏
-- 利用彩色输出宏输出 os 内存空间布局，即：输出 `.text`、`.data`、`.rodata`、`.bss` 各段位置，输出等级为 `INFO`。
+- 实现彩色输出宏（只要有彩色就好，不要求实现上述的不同等级log，不要求不同颜色，有时间的同学可以尝试）。
+- **隐性要求**: 实现一种机制可以关闭内核所有输出，lab2 开始要求关闭所有输出（如果实现了上述的 log，自然就实现了这一点）。
+- 使用彩色输出宏输出 os 内存空间布局，即：输出 `.text`、`.data`、`.rodata`、`.bss` 各段位置。
 
 challenge:实现多核 boot。
 
