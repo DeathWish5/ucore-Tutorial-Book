@@ -282,5 +282,123 @@ scheduler(void)
 
 可以看到 `idle` 线程死循环在了一件事情上：寻找一个 `RUNNABLE` 的进程，然后切换到它开始执行。当这个进程调用 `sched` 后，执行流会回到 `idle` 线程，然后继续开始寻找，如此往复。直到所有进程执行完毕，在 sys_exit 系统调用中有统计计数，一旦 exit 的进程达到用户程序数量就关机。
 
-也就是说，所有进程间切换都需要通过 `idle` 中转一下。那么可不可以一步到位呢？
+也就是说，所有进程间切换都需要通过 `idle` 中转一下。那么可不可以一步到位呢？答案是肯定的，其实 [rust版代码](https://github.com/rcore-os/rCore-Tutorial-v3) 就是采取这种实现：在一个进程退出时，直接寻找下一个就绪进程，然后直接切换过去，没有 idle 的中转。两种实现都是可行的。
 
+在了解这些之后，我们就可以实现协作式调度了，主要是 `sys_yeild` 系统调用，其实现十分简单，请同学们自行查看 `kernel/syscall.c`。
+
+## 时钟中断与抢占式调度
+
+没一个程序员都应该干过的一件事情就是提交一个死循环，看看系统会不会真的被卡死。目前，我们虽然有了基于 `sys_yield` 的协作式调度，但只要用户进程不愿意放弃执行权，我们的 os 是没有办法切换到其他进程的。这样的 os 低效且不公平，因此我们需要强制的进程切换手段，这就需要时钟中断的介入。
+
+`timer.c` 中包含了相关函数，功能分别为：打开了时钟中断使能，设置下一次中断间隔，读取当前的机器 cycle 数：
+
+```c
+// kernel/timer.c
+
+/// Enable timer interrupt
+void timerinit() {
+    // Enable supervisor timer interrupt
+    w_sie(r_sie() | SIE_STIE);
+    set_next_timer();
+}
+/// Set the next timer interrupt
+void set_next_timer() {
+    uint64 timebase = 125000;
+    set_timer(get_cycle() + timebase);
+}
+
+uint64 get_cycle() {
+    return r_time();
+}
+```
+
+qemu 模拟的时钟频率大致为 125000000Hz（未找到官方数据，属于个人测算），这里我们选择的时钟中断间隔为 1ms。
+
+利用 `get_cycle` 函数还可以实现 gettime 函数（注意测例要求的接口），原理比较简单不做赘述。
+
+那么时钟中断如何处理呢？按照设计，需要在发生时钟中断时干两件事：设置下一次时钟中断和切换当前进程。相关逻辑在 `kernel/trap.c` 中：
+
+```c
+void usertrap() {
+    // ...
+    uint64 cause = r_scause();
+    if(cause & (1ULL << 63)) {
+        cause &= ~(1ULL << 63);
+        switch(cause) {
+        case SupervisorTimer:
+            set_next_timer();
+            yield();
+            break;
+        default:
+            unknown_trap();
+            break;
+        }
+    } else {
+        // ....
+    }
+    usertrapret();
+}
+```
+
+按照 riscv 标准，通过 `scause` 最高位区分中断与异常，然后再细分处理。
+
+## 其他
+
+目前，如果内核发生异常，比如访问非法指令、时钟中断，我们是不处理的（以后可能会处理），这可以从 `kernel_trap` 的设计中看出：
+
+```c
+void kerneltrap() {
+    if((r_sstatus() & SSTATUS_SPP) == 0)
+        panic("kerneltrap: not from supervisor mode");
+    panic("trap from kernel\n");
+}
+
+void set_kerneltrap(void) {
+    w_stvec((uint64)kerneltrap & ~0x3); // DIRECT
+}
+```
+
+一旦从用户态进入内核态，我们就改变 `stvec`，防止内核中断错误的跳转到用户中断处理例程。在返回用户态时切换回来:
+
+```c
+void usertrap() {
+    set_kerneltrap();
+    // ...
+}
+
+void usertrapret() {
+    set_usertrap();
+    // ...
+}
+```
+
+最后，进程结束的 `sys_exit` 系统调用需要调整：
+
+```c
+void exit(int code) {
+    struct proc *p = curr_proc();
+    p->state = UNUSED;              // 空出进程池位置
+    sched();                        // 运行下一个进程
+}
+```
+
+`main` 函数需要进行新添加的初始化：
+
+```c
+void main() {
+    clean_bss();
+    trapinit();
+    batchinit();
+    procinit();
+    timerinit();            // 增加时钟初始化
+    run_all_app();
+    printf("start scheduler!\n");
+    scheduler();
+}
+```
+
+## 展望
+
+下一节就是页表了，页表极大的方便了用户态的开发，比如我们终于不用在一 0x80400000 这个奇怪的人为地址了，从 lab4 开始，所有的用户程序将 从 0x1000 开始，虽然这也是人为规定的，但比 0x80400000 要舒服很多。
+
+但是，困难旺旺是不会消失的，那么用户态的困难转嫁到哪里去了呢？准备好迎接硬骨头吧！
