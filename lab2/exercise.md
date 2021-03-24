@@ -50,7 +50,7 @@ challenge: 实现多核，可以并行执行用户程序。
 
 ## 问答作业
 
-1. 正确进入 U 态后，程序的特征还应有：使用 S 态特权指令，访问 S 态寄存器后会报错。目前由于一些其他原因，这些问题不太好测试，请同学们可以自行测试这些内容（参考[前三个测例](https://github.com/DeathWish5/rCore_tutorial_tests/tree/master/user/src/bin>）))，描述程序出错行为，同时注意注明你使用的 sbi 及其版本。
+1. 正确进入 U 态后，程序的特征还应有：使用 S 态特权指令，访问 S 态寄存器后会报错。目前由于一些其他原因，这些问题不太好测试，请同学们可以自行测试这些内容（参考[前三个测例](https://github.com/DeathWish5/rCore_tutorial_tests/tree/master/user/src/bin))，描述程序出错行为，同时注意注明你使用的 sbi 及其版本。
 
 2. 请结合用例理解 [trampoline.S](https://github.com/DeathWish5/ucore-Tutorial/blob/ch2/kernel/trampoline.S) 中两个函数 `userret` 和 `uservec` 的作用，并回答如下几个问题:
 
@@ -97,7 +97,7 @@ challenge: 实现多核，可以并行执行用户程序。
 
 3. 描述程序陷入内核的两大原因是中断和异常，请问 riscv64 支持那些中断／异常？如何判断进入内核是由于中断还是异常？描述陷入内核时的几个重要寄存器及其值。
 
-4. 对于任何中断， `__alltraps` 中都需要保存所有寄存器吗？你有没有想到一些加速 `__alltraps` 的方法？简单描述你的想法。
+4. 对于任何中断， `uservec` 中都需要保存所有寄存器吗？你有没有想到一些加速 `uservec` 的方法？简单描述你的想法。
 
 
 ## 报告要求
