@@ -255,4 +255,79 @@ freeproc(struct proc *p)
 该函数在进程的 `exit` 函数里调用。
 
 <font size=4 color=#D2691E>重要提醒!</font>
-> 
+> lab4 的 mmap 打破了连续内存的假定，所以会导致使用 mmap 后，ch5 程序 exit 会出错。对此框架的做法是: 放任内存泄露。(: 反正能 work 等下一轮迭代再修吧...)
+
+## shell
+
+从此我们就使用 shell 来运行其他程序了，从前面我们知道现在我们的 os 会默认加载 shell 这个用户程序，来看看 shell 的实现吧！
+
+```c++
+// 手搓了一个极简的 stack，用来维护用户输入，保存一行的输入
+char line[100] = {};
+int top = 0;
+void push(char c) { line[top++] = c; }
+void pop() { --top; }
+int is_empty() { return top == 0; }
+void clear() { top = 0; }
+
+int main() {
+    printf("C user shell\n");
+    printf(">> ");
+    // shell 是不会结束的
+    while (1) {
+        // 读取一个字符
+        char c = getchar();
+        switch (c) {
+            // 敲了回车，将输入内容解析位一个程序名，通过 fork + exec 执行 
+            case LF:
+            case CR:
+                printf("\n");
+                if (!is_empty()) {
+                    push('\0');
+                    int pid = fork();
+                    if (pid == 0) {
+                        // child process
+                        if (exec(line) < 0) {
+                            printf("no such program\n");
+                            exit(0);
+                        }
+                        panic("unreachable!");
+                    } else {
+                        // 父进程 wait 执行的函数
+                        int xstate = 0;
+                        int exit_pid = 0;
+                        exit_pid = wait(pid, &xstate);
+                        assert(pid == exit_pid, -1);
+                        printf("Shell: Process %d exited with code %d\n", pid, xstate);
+                    }
+                    // 无论如何，清空输入 buffer
+                    clear();
+                }
+                printf(">> ");
+                break;
+            case BS:
+            case DL:
+                // 退格键
+                if (!is_empty()) {
+                    putchar(BS);
+                    printf(" ");
+                    putchar(BS);
+                    pop();
+                }
+                break;
+            default:
+                // 普通输入，回显
+                putchar(c);
+                push(c);
+                break;
+        }
+    }
+    return 0;
+}
+```
+
+其实就是一个十分简单粗暴的字符串处理....，但是它确实能用，而且比我们以往运行程序的方式要好用很多！
+
+## 展望
+
+lab5 使得我们可以运行好多好多的进程，使用 fork 可以指数级别的制造新进程，但是这些进程之间如果不能很好的配合，仍然会比较僵硬，所以 ch6 我们将实现进程间通信 pipe.
