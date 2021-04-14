@@ -186,7 +186,7 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
             uint64 size = MIN(
                 n - w, 
                 pi->nread + PIPESIZE - pi->nwrite, 
-                PIPESIZE - (pi->nwrite % PIPESIZE
+                PIPESIZE - (pi->nwrite % PIPESIZE)
             );
             // 使用 copyin 读入用户 buffer 内容 
             copyin(p->pagetable, &pi->data[pi->nwrite % PIPESIZE], addr + w, size);
@@ -249,8 +249,8 @@ sys_pipe(uint64 fdarray) {
     fd0 = fdalloc(f0);
     fd1 = fdalloc(f1);
     size_t PSIZE = sizeof(fd0);
-    copyout(p->pagetable, fdarray, &fd0, PSIZE);
-    copyout(p->pagetable, fdarray + PSIZE, &fd1, PSIZE);
+    copyout(p->pagetable, fdarray, &fd0, sizeof(fd0));
+    copyout(p->pagetable, fdarray + sizeof(uint64), &fd1, sizeof(fd1));
     return 0;
 }
 ```
