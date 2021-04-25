@@ -6,7 +6,7 @@
 
 ### 硬链接
 
-你的电脑桌面是咋样的？是放满了图标吗？反正我的 windows 是这样的。显然很少人会真的吧可执行文件放到桌面上，桌面图标其实都是一些快捷方式。或者用 unix 的术语来说：软链接。为了减少工作量，我们今天来实现软链接的兄弟：[硬链接](https://en.wikipedia.org/wiki/Hard_link)。
+你的电脑桌面是咋样的？是放满了图标吗？反正我的 windows 是这样的。显然很少人会真的把可执行文件放到桌面上，桌面图标其实都是一些快捷方式。或者用 unix 的术语来说：软链接。为了减少工作量，我们今天来实现软链接的兄弟：[硬链接](https://en.wikipedia.org/wiki/Hard_link)。
 
 硬链接要求两个不同的目录项指向同一个文件，在我们的文件系统中也就是两个不同名称目录项指向同一个磁盘块。本节要求实现三个系统调用 sys_linkat、sys_unlinkat、sys_stat。
 
@@ -59,8 +59,8 @@ fstat:
       }
       
       // 文件类型只需要考虑:
-      ＃define DIR 0o040000		// directory
-      ＃define FILE 0o100000		// ordinary regular file
+      #define DIR 0x040000		// directory
+      #define FILE 0x100000		// ordinary regular file
       ```
     * 返回值：如果出现了错误则返回 -1，否则返回 0。
     * 可能的错误
