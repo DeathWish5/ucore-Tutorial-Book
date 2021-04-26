@@ -201,8 +201,8 @@ void bunpin(struct buf *b) {
 // 基本信息：块大小 BSIZE = 1024B，总容量 FSSIZE = 1000 个 block = 1000 * 1024 B。
 // Layout:
 // 0号块目前不起作用，可以忽略。superblock 固定为 1 号块，size 固定为一个块。
-// 其后是储存 inode 的若干个块，占用块数为 inode 总数 / 每个块上可以容纳的 inode 数量，
-// 其中 inode 总数固定为 200，每个块的容量取决于 sizeof(struct disk_inode)
+// 其后是储存 inode 的若干个块，占用块数 = inode 上限 / 每个块上可以容纳的 inode 数量，
+// 其中 inode 上限固定为 200，每个块的容量 = BSIZE / sizeof(struct disk_inode)
 // 再之后是数据块相关内容，包含一个 储存空闲块位置的 bitmap 和 实际的数据块，bitmap 块
 // 数量固定为 NBITMAP = FSSIZE / (BSIZE * 8) + 1 = 1000 / 8 + 1 = 126 块。
 // [ boot block | sb block | inode blocks | free bit map | data blocks ]
