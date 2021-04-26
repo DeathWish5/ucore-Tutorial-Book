@@ -210,7 +210,267 @@ void bunpin(struct buf *b) {
 
 注意：不推荐同学们修改该布局，除非你完全看懂了 fs 的逻辑，所以最好不要改变 `disk_inode` 这个结构的大小，如果想要增删字段，一定使用 pad。
 
-那么什么是 inode 和 data block 呢？
+那么什么是 inode 和 data block 呢？以下是 superblock, dinode，inode, dirent 三个结构体定义（务必基本理解）：
 
-// TODO: 课堂上似乎讲了，先跳过？
-// TODO: 有其他事情需要搞，今晚一定补完，QAQ，满地打滚求放过。。。。。
+```c++
+// 超级块位置固定，用来指示文件系统的一些元数据，这里最重要的是 inodestart 和 bmapstart
+struct superblock {
+    uint magic;     // Must be FSMAGIC
+    uint size;      // Size of file system image (blocks)
+    uint nblocks;   // Number of data blocks
+    uint ninodes;   // Number of inodes.
+    uint inodestart;// Block number of first inode block
+    uint bmapstart; // Block number of first free map block
+};
+
+// On-disk inode structure
+// 储存磁盘 inode 信息，主要是文件类型和数据块的索引，其大小影响磁盘布局，不要乱改，可以用 pad
+struct dinode {
+    short type;             // File type
+    short pad[3];
+    uint size;              // Size of file (bytes)
+    uint addrs[NDIRECT + 1];// Data block addresses
+};
+
+// in-memory copy of an inode
+// dinode 的内存缓存，为了方便，增加了 dev, inum, ref, valid 四项管理信息，大小无所谓，可以随便改。
+struct inode {
+    uint dev;           // Device number
+    uint inum;          // Inode number
+    int ref;            // Reference count
+    int valid;          // inode has been read from disk?
+    short type;         // copy of disk inode
+    uint size;
+    uint addrs[NDIRECT+1];  // data block num
+};
+
+// 目录对应的数据块的内容本质是 filename 到 file inode_num 的一个 map，这里为了简单，就存为一个 `dirent` 数组，查找的时候遍历对比
+struct dirent {
+    ushort inum;
+    char name[DIRSIZ];
+};
+```
+
+注意几个量的概念: 
+
+* block num: 表示某一个磁盘块的编号。
+* inode num: 表示某一个 inode 在所有 inode 项里的编号。注意 inode blocks 其实就是一个 inode 的大数组。
+
+同时，目录本身是一个 filename 到 file inode　num　的　map，可以完成 filename 到 inode_num 的转化。
+
+注意：为了简单，我们的文件系统只有单级目录，也就是只有根目录一个目录，所有文件都在这一个目录里，这个目录里也再没有目录。
+
+那么，在没有任何内存缓存的情形下，如何从磁盘中读取一个文件呢？更加具体来说，`filewrite(filename, "hello world")` 这句伪代码是如何执行的？
+
+首先，我们需要找到该文件对应的 inode，这个过程是：首先找到根目录的 inode，其 inode_num 固定为 0，可以在第一个 inode block 的第一项找到，root_inode 会指示数据块的位置，这些　block 是一个 filename 到 file inode_num 的一个 map，从而依据 filename 得到 inode_num。再次回到 inode blocks，找到第　inode_num 个，就得到了文件对应的 inode。在该　inode 中，可以找到文件的类型、大小和对应数据块的编号(block num)，最后就可以依据　block num　找到对应的数据块，最终完成读写。
+
+inode blocks 的位置在 superblock 中有指示。
+
+理解了 superblock / inode / data-block 的套路之后，我们来看看如何如何完成文件操作。
+
+##### 文件系统实现
+
+还是从 syscall 入手讲起, lab8 进一步更新了 sys_write / sys_read:
+
+```c++
+uint64 sys_write(int fd, uint64 va, uint64 len) {
+    if (fd <= 2) {
+        return console_write(va, len);
+    }
+    struct proc *p = curr_proc();
+    struct file *f = p->files[fd];
+    if (f->type == FD_PIPE) {
+        return pipewrite(f->pipe, va, len);
+    } else if (f->type == FD_INODE) {   // 如果是一个磁盘文件
+        return filewrite(f, va, len);
+    }
+    return -1;
+}
+
+uint64 sys_read(int fd, uint64 va, uint64 len) {
+    if (fd <= 2) {
+        return console_read(va, len);
+    }
+    struct proc *p = curr_proc();
+    struct file *f = p->files[fd];
+    if (f->type == FD_PIPE) {
+        return piperead(f->pipe, va, len);
+    } else if (f->type == FD_INODE) {   // 如果是一个磁盘文件
+        return fileread(f, va, len);
+    }
+    return -1;
+}
+```
+
+现在我们来完成　`filewrite` 和 `fileread`,首先需要更新 lab6 中的　file 结构体定义，现在我们多了一种文件类型，除了预留给 0、1、2　的标准输入输出文件和 pipe 文件，多了一种 inode 文件，也就是磁盘文件：
+
+```diff
+// file.h
+struct file {
+-   enum { FD_NONE = 0, FD_PIPE} type;
++   enum { FD_NONE = 0, FD_PIPE, FD_INODE} type;
+    int ref; // reference count
+    char readable;
+    char writable;
+    struct pipe *pipe; // FD_PIPE
++   struct inode *ip;  // FD_INODE
+    uint off;
+};
+```
+
+对于 inode，为了解决共享问题（不同进程可以打开同一个磁盘文件），也有一个全局的 inode table，每当新打开一个文件的时候，会把一个空闲的　inode 绑定为对应 dinode 的缓存，这一步通过 `iget`　完成:
+
+```c++
+// 找到 inum 号 dinode 绑定的 inode，如果不存在新绑定一个
+static struct inode *
+iget(uint dev, uint inum) {
+    struct inode *ip, *empty;
+    // 遍历查找 inode table
+    for (ip = &itable.inode[0]; ip < &itable.inode[NINODE]; ip++) {
+        // 如果有对应的，引用计数 +1并返回
+        if (ip->ref > 0 && ip->dev == dev && ip->inum == inum) {
+            ip->ref++;
+            return ip;
+        }
+    }
+    // 如果没有对于的，找一个空闲 inode 完成绑定
+    empty = find_empty()
+    // GG，inode 表满了，果断自杀
+    if (empty == 0)
+        panic("iget: no inodes");
+    // 注意这里仅仅是写了元数据，没有实际读取，实际读取推迟到后面
+    ip = empty;
+    ip->dev = dev;
+    ip->inum = inum;
+    ip->ref = 1;
+    ip->valid = 0;  // 没有实际读取，valid = 0
+    return ip;
+}
+```
+
+当已经得到一个文件对应的 inode 后，可以通过 ivalid 函数确保其是有效的：
+
+```c++
+// Reads the inode from disk if necessary.
+void ivalid(struct inode *ip) {
+    struct buf *bp;
+    struct dinode *dip;
+    if (ip->valid == 0) {
+        // bread　可以完成一个块的读取，这个在将 buf 的时候说过了
+        // IBLOCK 可以计算 inum 在几个 block
+        bp = bread(ip->dev, IBLOCK(ip->inum, sb));
+        // 得到 dinode 内容
+        dip = (struct dinode *) bp->data + ip->inum % IPB;
+        // 完成实际读取
+        ip->type = dip->type;
+        ip->size = dip->size;
+        memmove(ip->addrs, dip->addrs, sizeof(ip->addrs));
+        // buf 暂时没用了
+        brelse(bp);
+        // 现在有效了
+        ip->valid = 1;
+    }
+}
+```
+
+在 inode 有效之后，可以通过 writei, readi 完成读写：
+
+```c++
+// 从 ip 对应文件读取 [off, off+n) 这一段数据到 dst
+int readi(struct inode *ip, char* dst, uint off, uint n) {
+    uint tot, m;
+    // 还记得 buf 吗？
+    struct buf *bp;
+    for (tot = 0; tot < n; tot += m, off += m, dst += m) {
+        // bmap 完成 off 到 block num 的对应，见下
+        bp = bread(ip->dev, bmap(ip, off / BSIZE));
+        // 一次最多读一个块，实际读取长度为 m
+        m = MIN(n - tot, BSIZE - off % BSIZE);
+        memmove(dst, (char*)bp->data + (off % BSIZE), m);
+        brelse(bp);
+    }
+    return tot;
+}
+
+// 同 readi
+int writei(struct inode *ip, char* src, uint off, uint n) {
+    uint tot, m;
+    struct buf *bp;
+
+    for (tot = 0; tot < n; tot += m, off += m, src += m) {
+        bp = bread(ip->dev, bmap(ip, off / BSIZE));
+        m = MIN(n - tot, BSIZE - off % BSIZE);
+        memmove(src, (char*)bp->data + (off % BSIZE), m);
+        bwrite(bp);
+        brelse(bp);
+    }
+
+    // 文件长度变长，需要更新 inode 里的 size 字段
+    if (off > ip->size)
+        ip->size = off;
+
+    // 有可能 inode 信息被更新了，写回
+    iupdate(ip);
+
+    return tot;
+}
+```
+
+bmap 完成的功能很简单，但是我们支持了间接索引，同时还设计到文件大小的改变，所以也拉出来看看:
+
+```c++
+// bn = off / BSIZE
+uint bmap(struct inode *ip, uint bn) {
+    uint addr, *a;
+    struct buf *bp;
+    // 如果 bn < 12，属于直接索引, block num = ip->addr[bn]
+    if (bn < NDIRECT) {
+        // 如果对应的 addr, 也就是　block num = 0，表明文件大小增加，需要给文件分配新的 data block
+        // 这是通过 balloc 实现的，具体做法是在 bitmap 中找一个空闲 block，置位后返回其编号
+        if ((addr = ip->addrs[bn]) == 0)    
+            ip->addrs[bn] = addr = balloc(ip->dev);
+        return addr;
+    }
+    bn -= NDIRECT;
+    // 间接索引块，那么对应的数据块就是一个大　addr 数组。
+    if (bn < NINDIRECT) {
+        // Load indirect block, allocating if necessary.
+        if ((addr = ip->addrs[NDIRECT]) == 0)
+            ip->addrs[NDIRECT] = addr = balloc(ip->dev);
+        bp = bread(ip->dev, addr);
+        a = (uint *) bp->data;
+        if ((addr = a[bn]) == 0) {
+            a[bn] = addr = balloc(ip->dev);
+            bwrite(bp);
+        }
+        brelse(bp);
+        return addr;
+    }
+
+    panic("bmap: out of range");
+    return 0;
+}
+```
+
+iupdate, balloc 等比较简单，同学们可以自行查看。值得一提的是，是的 `writei` 和 `readi` 考虑了数据来源是内核还是用户，多调用了一层 copyin/copyout，没有本质改变。
+
+现在我们终于可以看看 filewrite 长啥样了：
+
+```c++
+uint64 filewrite(struct file* f, uint64 va, uint64 len) {
+    int r;
+    // 获得文件对应的 inode，不一定有效，但必须有元数据，元数据在 open 的时候写入
+    ivalid(f->ip);
+    // 注意，由于 writei 处理了 copyin，这里可以直接传用户 va 进去
+    if ((r = writei(f->ip, 1, va, f->off, len)) > 0)
+        f->off += r;    // 注意这里移动了文件指针
+    return r;
+}
+```
+
+`fileread` 同理,不在赘述。其实，比文件读写更家复杂的是文件的打开，注意 open 有创建的语义，创建文件是比较复杂的内容，中涉及到了对 inode blocks 的改动。其实在 `writei` 的时候，有可能是的文件大小增加，这时就已经设计到了磁盘的修改。
+
+
+
+
+
