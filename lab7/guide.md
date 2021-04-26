@@ -635,7 +635,3 @@ void iput(struct inode *ip) {
 ## 展望
 
 lab8 马上就位，在 lab8 中，我们将实现带参数的 exec, 实现从磁盘 load 文件来丢掉丑陋的 pack.py，支持 elf 解析来摆脱人为规定的地址，此外，还将支持标准文件的关闭和 sys_dup 来支持 IO 重定向。我们还将拥有一批用户态程序如 ls, echo, cat 等，是不是有点唬人了？虽然这些和 lab8 的要求并没有什么联系，emm，到时候就知道了。
-
-<div style="color:white">
-（悄悄：C 代码还没写完 QAQ，rust 那边有同学帮忙写了用户态程序，直接算完成 lab8，C 这边有没有大佬支持一下啊 QAQ)
-</div>
