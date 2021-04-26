@@ -189,6 +189,26 @@ void bunpin(struct buf *b) {
 
 可以通过 `bread` 来读取特定磁盘 block 的内容，可以通过 `bwrite` 写回。
 
+需要特别注意 brelse 函数：
+
+```c++
+void brelse(struct buf *b) {
+    b->refcnt--;
+    if (b->refcnt == 0) {
+        b->next->prev = b->prev;
+        b->prev->next = b->next;
+        b->next = bcache.head.next;
+        b->prev = &bcache.head;
+        bcache.head.next->prev = b;
+        bcache.head.next = b;
+    }
+}
+```
+
+**需要特别注意**的是 `brelse` 不会真的如字面意思释放一个 buf，。它的准确含义是暂时不操作该 buf 了，buf 的真正释放会被推迟到 buf 池满，无法分配的时候，就会把最近最久未使用的 buf 释放掉（释放 = 写回 + 清空）。这是为了仅可能保留内存缓存，因为读写磁盘真的太太太太慢了。
+
+此外，brelse 的数量必须和 bget 相同，因为 bget 会是的引用计数加一。如果没有相匹配的 brelse，就好比 new 了之后没有 delete。千万注意。
+
 ## nfs 文件系统
 
 在 `fs.h` 和 `fs.c` 中，我们实现了 naive fs 的主要逻辑，注意这部分逻辑要和另一个目录中的 `nfs/fs.c` 相匹配。
@@ -468,9 +488,154 @@ uint64 filewrite(struct file* f, uint64 va, uint64 len) {
 }
 ```
 
-`fileread` 同理,不在赘述。其实，比文件读写更家复杂的是文件的打开，注意 open 有创建的语义，创建文件是比较复杂的内容，中涉及到了对 inode blocks 的改动。其实在 `writei` 的时候，有可能是的文件大小增加，这时就已经设计到了磁盘的修改。
+`fileread` 同理,不在赘述。
 
+你可能已经发现一个 bug，为啥莫名奇妙就有了 `inum`(作为 iget 的参数)？其实 `inum` 是在 open 一个 file 的时候获得的，open 其实非常复杂，要注意 open 有创建的语义，创建文件是比较复杂的内容，中涉及到了对 inode blocks 的改动。其实在 `writei` 的时候，有可能是的文件大小增加，这时就已经设计到了磁盘的修改。
 
+还是从 syscall 开始：
 
+```c++
+#define O_RDONLY  0x000     // 只读
+#define O_WRONLY  0x001     // 只写
+#define O_RDWR    0x002     // 可读可写
+#define O_CREATE  0x200 　　//　如果不存在，创建
+#define O_TRUNC   0x400 　　// 舍弃原有内容，从头开始写
 
+uint64 sys_openat(uint64 va, uint64 omode, uint64 _flags) {
+    struct proc *p = curr_proc();
+    char path[200];
+    copyinstr(p->pagetable, path, va, 200);
+    return fileopen(path, omode);
+}
+```
 
+``` c++
+int fileopen(char *path, uint64 omode) {
+    int fd;
+    struct file *f;
+    struct inode *ip;
+    if (omode & O_CREATE) {
+        // 新常见一个路径为 path 的文件
+        ip = create(path, T_FILE);
+    } else {
+        // 尝试寻找一个路径为 path 的文件
+        ip = namei(path);
+        ivalid(ip);
+    }
+    // 还记得吗？从全局文件池和进程 fd 池中找一个空闲的出来，参考 lab6
+    f = filealloc();
+    fd = fdalloc(f);
+    // 初始化
+    f->type = FD_INODE;
+    f->off = 0;
+    f->ip = ip;
+    f->readable = !(omode & O_WRONLY);
+    f->writable = (omode & O_WRONLY) || (omode & O_RDWR);
+    if ((omode & O_TRUNC) && ip->type == T_FILE) {
+        itrunc(ip);
+    }
+    return fd;
+}
+```
+
+可见，核心函数其实是 `create` 和 `namei`, 后者比较简单，先来研究一下:
+
+```c++
+// namei = 获得根目录，然后在其中遍历查找 path
+struct inode *namei(char *path) {
+    struct inode *dp = root_dir();
+    return dirlookup(dp, path, 0);
+}
+
+// root_dir 位置固定
+struct inode *root_dir() {
+    struct inode* r = iget(ROOTDEV, ROOTINO);
+    ivalid(r);
+    return r;
+}
+
+// 便利根目录所有的 dirent，找到 name 一样的 inode
+struct inode *
+dirlookup(struct inode *dp, char *name, uint *poff) {
+    uint off, inum;
+    struct dirent de;
+    // 每次迭代处理一个 block，注意根目录可能有多个 data block
+    for (off = 0; off < dp->size; off += sizeof(de)) {
+        readi(dp, 0, (uint64) &de, off, sizeof(de));
+        if (strncmp(name, de.name, DIRSIZ) == 0) {
+            if (poff)
+                *poff = off;
+            inum = de.inum;
+            // 找到之后，绑定一个内存 inode 然后返回
+            return iget(dp->dev, inum);
+        }
+    }
+
+    return 0;
+}
+```
+
+create 比较复杂，它长这样：
+
+```c++
+static struct inode *
+create(char *path, short type) {
+    struct inode *ip, *dp;
+    if(ip = namei(path) != 0) {
+        // 已经存在，直接返回
+        return ip;
+    }
+    // 创建一个文件,首先分配一个空闲的 disk inode, 绑定内存 inode 之后返回
+    ip = ialloc(dp->dev, type);
+    // 注意 ialloc 不会执行实际读取，必须有 ivalid
+    ivalid(ip);
+    // 在根目录创建一个 dirent 指向刚才创建的 inode 
+    dirlink(dp, path, ip->inum);
+    // dp 不用了，iput 就是释放内存 inode，和 iget 正好相反。
+    iput(dp);
+    return ip;
+}
+```
+
+ialloc 干的事情：便利 inode blocks 找到一个空闲的，初始化并返回。dirlink 干的事情，便利根目录数据块，找到一个空的 dirent，设置 dirent = {inum, filename} 然后返回，注意这一步可能找不到空位，这是需要找一个新的数据块，并扩大 root_dir size，这是由　bmap 自动完成的。这两个函数就不做代码展示。
+
+fileopen 还可能会导致文件 truncate，也就是截断，具体做法是舍弃全部现有内容，释放所有 data block 并添加到 free bitmap 里。这也是目前 nfs 中唯一的文件变短方式。
+
+最后一个剩余的操作是　fclose，其实 inode 文件的关闭只需要调用 iput 就好了，iput 的实现简单到让人感觉迷惑，就是 inode 引用计数减一。诶？为什么没有计数为 0 就写回然后释放 inode 的操作？和 buf 的释放同理，这里会等 inode 池满了之后自行被替换出去，重新读磁盘实在太太太太慢了。对了，千万记得 iput 和 iget 数量相同，一定要一一对应，否则你懂的。C 编程实在太危险了 QAQ，我感觉框架里打概率有泄漏。。没导致错误而已。
+
+```c++
+void
+fileclose(struct file *f)
+{
+    if(--f->ref > 0) {
+        return;
+    }
+    // 暂时不支持标准输入输出文件的关闭
+    if(f->type == FD_PIPE){
+        pipeclose(f->pipe, f->writable);
+    } else if(f->type == FD_INODE) {
+        iput(f->ip);
+    }
+
+    f->off = 0;
+    f->readable = 0;
+    f->writable = 0;
+    f->ref = 0;
+    f->type = FD_NONE;
+}
+```
+```c++
+void iput(struct inode *ip) {
+    ip->ref--;
+}
+```
+
+// TODO 总感觉讲完了，但又没有完全讲完，大家没搞懂的地方可以发个 issue 然后最后 wechat 再 cue 我一下
+
+## 展望
+
+lab8 马上就位，在 lab8 中，我们将实现带参数的 exec, 实现从磁盘 load 文件来丢掉丑陋的 pack.py，支持 elf 解析来摆脱人为规定的地址，此外，还将支持标准文件的关闭和 sys_dup 来支持 IO 重定向。我们还将拥有一批用户态程序如 ls, echo, cat 等，是不是有点唬人了？虽然这些和 lab8 的要求并没有什么联系，emm，到时候就知道了。
+
+<div style="color:white">
+（悄悄：C 代码还没写完 QAQ，rust 那边有同学帮忙写了用户态程序，直接算完成 lab8，C 这边有没有大佬支持一下啊 QAQ)
+</div>
