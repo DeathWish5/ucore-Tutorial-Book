@@ -259,7 +259,6 @@ int run_next_app() {
 void trapinit(void)
 {
     w_stvec((uint64)uservec & ~0x3);   // 写 stvec, 最后两位表明跳转模式，该实验始终为 0
-    intr_on();      // 开启中断使能
 }
 ```
 
