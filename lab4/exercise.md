@@ -30,8 +30,8 @@ mmap 系统调用新定义：
 
 munmap
 - syscall ID：215
-- C接口：`int mmap(void* start, unsigned long long len)`
-- Rust接口：`fn mmap(start: usize, len: usize) -> i32`
+- C接口：`int mumap(void* start, unsigned long long len)`
+- Rust接口：`fn mumap(start: usize, len: usize) -> i32`
 - 功能：取消一块虚存的映射。
 - 参数：同 mmap
 - 说明：
